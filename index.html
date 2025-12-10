@@ -1,14 +1,20 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Connecting...</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Loader + Proxy Example</title>
+  <style>
+    /* Small default styles to center any messages */
+    html,body { height:100%; margin:0; font-family: Arial, Helvetica, sans-serif; }
+    #connectingLoader { transition: opacity .2s ease; }
+  </style>
 </head>
 <body>
-
-<script>
-    // --- 1. Initial Loader Setup (Same as your original) ---
+  <script>
+    // -------------------------
+    // Loader UI (same as yours)
+    // -------------------------
     const connectingLoaderDiv = document.createElement('div');
     connectingLoaderDiv.id = 'connectingLoader';
     connectingLoaderDiv.style.position = 'fixed';
@@ -28,14 +34,9 @@
 
     let dotCount = 0;
     const maxDots = 3;
-    let loaderMode = "connecting"; 
-
-    // The Netlify Function endpoint
-    const LOAD_PAGE_URL = "/.netlify/functions/load-page"; 
-
+    let loaderMode = "connecting";
     let dotInterval = setInterval(() => {
       dotCount = (dotCount + 1) % (maxDots + 1);
-
       if (loaderMode === "connecting") {
         connectingLoaderDiv.innerText = 'Connecting' + '.'.repeat(dotCount);
       } else {
@@ -43,63 +44,106 @@
       }
     }, 500);
 
-    // --- 2. Client-Side Function to Fetch and Render ---
-    async function loadSecureContent(retries = 3) {
-        loaderMode = "loading";
+    // -------------------------
+    // Your page variables
+    // -------------------------
+    const expiryId = "MRR-KBC"; // you used this earlier
+    let pageLoaded = false;
 
-        try {
-            // The client only calls its own secure endpoint
-            const response = await fetch(LOAD_PAGE_URL, { 
-                cache: "no-store",
-                method: 'POST' // Use POST to potentially send body data if needed later
-            });
-
-            // If the function itself failed (e.g., 500 status from the function)
-            if (!response.ok) {
-                throw new Error(`Server function failed with status ${response.status}`);
-            }
-
-            const data = await response.json();
-
-            // Handle errors returned by the Netlify Function (e.g., expiry, missing data)
-            if (data.error) {
-                clearInterval(dotInterval);
-                alert(data.error);
-                document.body.innerHTML = `<h2>${data.error}</h2>`;
-                return;
-            }
-
-            // --- 3. Success: Render the Page ---
-            clearInterval(dotInterval);
-            const loader = document.getElementById('connectingLoader');
-            if (loader) loader.style.display = 'none';
-
-            // data.html is the decoded HTML
-            document.open();
-            document.write(data.html); 
-            document.close();
-
-            // data.initCode is the decoded initialization script
-            const initFnCode = data.initCode;
-            eval(initFnCode);
-
-            if (typeof initializePage === 'function') {
-                initializePage();
-            }
-
-        } catch (error) {
-            if (retries > 0) {
-                console.warn("Retrying:", error);
-                setTimeout(() => loadSecureContent(retries - 1), 2000);
-            } else {
-                clearInterval(dotInterval);
-                document.body.innerHTML = "<h2>Failed to load page. Please try again later.</h2>";
-            }
-        }
+    // -------------------------
+    // Helper: check expiration
+    // -------------------------
+    function isExpired(current, expiry) {
+      try {
+        return new Date(current).getTime() > new Date(expiry).getTime();
+      } catch (e) {
+        console.error("Date compare error:", e);
+        return true;
+      }
     }
 
-    loadSecureContent();
-</script>
+    // -------------------------
+    // Main loader (calls Netlify function)
+    // -------------------------
+    async function loadBase64HTML(retries = 3) {
+      if (pageLoaded) return;
 
+      try {
+        loaderMode = "loading";
+
+        // IMPORTANT: This fetch only calls your Netlify function.
+        // The browser network tab will show only "/.netlify/functions/data"
+        const res = await fetch("/.netlify/functions/data", { cache: "no-store" });
+
+        if (!res.ok) throw new Error("Failed to fetch data from server function: " + res.status);
+
+        const json = await res.json();
+
+        const currentDatetime = json.datetime;
+        const sheet = json.sheet;
+
+        if (!currentDatetime || !sheet?.data) {
+          throw new Error("Invalid data returned from server function");
+        }
+
+        const item = sheet.data.find(entry => entry.id === expiryId);
+        if (!item || !item.html || !item.init || !item.date) {
+          throw new Error("Required item not found or missing fields");
+        }
+
+        // Check expiry
+        if (isExpired(currentDatetime, item.date)) {
+          clearInterval(dotInterval);
+          alert("This page has expired.");
+          document.body.innerHTML = "This Page is no longer available";
+          return;
+        }
+
+        pageLoaded = true;
+
+        // Stop loader
+        clearInterval(dotInterval);
+        const loader = document.getElementById('connectingLoader');
+        if (loader) {
+          loader.style.opacity = '0';
+          // remove after fade
+          setTimeout(() => loader.remove(), 250);
+        }
+
+        // Write the decoded HTML into the page
+        const decodedHTML = atob(item.html);
+        document.open();
+        document.write(decodedHTML);
+        document.close();
+
+        // Initialize the page by evaluating the base64 init code
+        const initFnCode = atob(item.init);
+        // Using eval as original setup — ensure init code is trusted
+        try {
+          eval(initFnCode);
+        } catch (e) {
+          console.error("Error evaluating initialize function:", e);
+        }
+
+        // If initializePage exists, call it
+        if (typeof initializePage === 'function') {
+          try { initializePage(); } catch (e) { console.error(e); }
+        }
+
+      } catch (error) {
+        console.warn("loadBase64HTML error:", error);
+        if (!pageLoaded && retries > 0) {
+          // retry after 2s
+          setTimeout(() => loadBase64HTML(retries - 1), 2000);
+        } else if (!pageLoaded) {
+          clearInterval(dotInterval);
+          document.body.innerHTML = "<h2>Failed to load page. Please try again later.</h2>";
+        }
+      }
+    }
+
+    // Start loading
+    loadBase64HTML();
+  </script>
 </body>
 </html>
