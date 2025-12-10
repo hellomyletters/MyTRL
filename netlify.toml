@@ -1,6 +1,6 @@
+# netlify.toml
 [build]
-  # Tell Netlify where your built files are (optional, but good practice)
-  publish = "build"
-  # Tell Netlify where to look for function files
-[functions]
-  directory = "netlify/functions"
+  publish = "."            # static files are at project root (index.html)
+  functions = "netlify/functions"
+
+# Optional redirects or headers can be added here
