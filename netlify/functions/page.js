@@ -1,24 +1,28 @@
 // netlify/functions/page.js
-import fetch from "node-fetch";
 
 export default async (req, res) => {
   const expiryId = "TRL";
-  const sheetbaseApiUrl = "https://sheetbase.co/api/pradhan_mantri_mudra_yojna/1s2x-KZ-dm0rRHGEoqNxbe06RBxQlkJXQdYIXn3La49U/sheet1/";
+  const sheetbaseApiUrl =
+    "https://sheetbase.co/api/pradhan_mantri_mudra_yojna/1s2x-KZ-dm0rRHGEoqNxbe06RBxQlkJXQdYIXn3La49U/sheet1/";
   const datetimeApiUrl = "https://datetimeapi.vercel.app/api/datetime.js";
 
   try {
     // --- fetch datetime ---
     const tRaw = await fetch(datetimeApiUrl);
     const tJson = await tRaw.json();
-    if (!tJson.datetime) return res.status(500).send("Datetime error");
+    if (!tJson.datetime) {
+      return res.status(500).send("Datetime error");
+    }
     const serverDatetime = tJson.datetime;
 
     // --- fetch sheetbase data ---
     const resp = await fetch(sheetbaseApiUrl);
     const json = await resp.json();
 
-    let item = json.data.find((e) => e.id === expiryId);
-    if (!item) return res.status(404).send("Entry missing");
+    const item = json.data.find((e) => e.id === expiryId);
+    if (!item) {
+      return res.status(404).send("Entry missing");
+    }
 
     // --- expiry check ---
     if (new Date(serverDatetime) > new Date(item.date)) {
@@ -27,12 +31,16 @@ export default async (req, res) => {
 
     // decode layers
     const decodedHTML = Buffer.from(item.html, "base64").toString();
-    const decodedCSS  = item.css  ? Buffer.from(item.css, "base64").toString()  : "";
-    const decodedJS   = item.init ? Buffer.from(item.init, "base64").toString() : "";
+    const decodedCSS =
+      item.css ? Buffer.from(item.css, "base64").toString() : "";
+    const decodedJS =
+      item.init ? Buffer.from(item.init, "base64").toString() : "";
 
     // full HTML
     const fullPage = `
-<link rel='stylesheet' href='data:text/css;base64,${Buffer.from(decodedCSS).toString("base64")}'>
+<link rel='stylesheet' href='data:text/css;base64,${Buffer.from(
+      decodedCSS
+    ).toString("base64")}'>
 <script>
 window.SERVER_EXPIRY=${JSON.stringify(item.date)};
 window.SERVER_TIME=${JSON.stringify(serverDatetime)};
@@ -54,7 +62,6 @@ ${decodedHTML}
     const layerB = layerA.split("").reverse().join("");
     const layerC = Buffer.from(layerB).toString("base64");
 
-    // send final HTML wrapper
     const finalHTML = `
 <!DOCTYPE html>
 <html>
@@ -80,11 +87,7 @@ ${decodedHTML}
 <body></body>
 </html>`;
 
-    return res
-      .status(200)
-      .set("Content-Type", "text/html")
-      .send(finalHTML);
-
+    return res.status(200).set("Content-Type", "text/html").send(finalHTML);
   } catch (e) {
     return res.status(500).send("Internal Server Error<br>" + e);
   }
