@@ -1,5 +1,18 @@
 [build]
   functions = "netlify/functions"
+  publish = "."
 
-# optional: publish directory (if you have static files). If you only use the function, you can omit.
-# publish = "public"
+[[redirects]]
+  from = "/"
+  to = "/.netlify/functions/render"
+  status = 200
+
+[[redirects]]
+  from = "/style.css"
+  to = "/.netlify/functions/style"
+  status = 200
+
+[[redirects]]
+  from = "/init.js"
+  to = "/.netlify/functions/init"
+  status = 200
