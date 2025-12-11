@@ -1,7 +1,5 @@
 [build]
   functions = "netlify/functions"
 
-[[redirects]]
-  from = "/"
-  to = "/.netlify/functions/page"
-  status = 200
+# optional: publish directory (if you have static files). If you only use the function, you can omit.
+# publish = "public"
