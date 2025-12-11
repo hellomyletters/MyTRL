@@ -1,9 +1,7 @@
 [build]
   functions = "netlify/functions"
-  publish = "public"
 
 [[redirects]]
   from = "/"
   to = "/.netlify/functions/page"
   status = 200
-  force = true
