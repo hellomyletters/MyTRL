@@ -1,6 +1,10 @@
-# netlify.toml
 [build]
-  publish = "."            # static files are at project root (index.html)
-  functions = "netlify/functions"
+functions = "netlify/functions"
+publish = "public" # if you have other static assets; otherwise can be any folder
 
-# Optional redirects or headers can be added here
+
+[[redirects]]
+from = "/"
+to = "/.netlify/functions/page"
+status = 200
+force = true
