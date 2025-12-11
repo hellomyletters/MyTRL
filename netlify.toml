@@ -1,10 +1,9 @@
 [build]
-functions = "netlify/functions"
-publish = "public" # if you have other static assets; otherwise can be any folder
-
+  functions = "netlify/functions"
+  publish = "public"
 
 [[redirects]]
-from = "/"
-to = "/.netlify/functions/page"
-status = 200
-force = true
+  from = "/"
+  to = "/.netlify/functions/page"
+  status = 200
+  force = true
